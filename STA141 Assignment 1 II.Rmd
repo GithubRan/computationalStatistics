@@ -1,0 +1,154 @@
+---
+title: "STA141 Assignment 1 II"
+author: "RanLiu"
+date: "October 8, 2015"
+output: word_document
+---
+Load the data and packages into R Markdown.
+
+```{r, message = FALSE}
+setwd("E:/RLiu_R/sta141")
+load(url("http://eeyore.ucdavis.edu/stat141/Data/vehicles.rda"))
+```
+
+# Anomalies
+
+There are duplicated observations, extreme/unreasonable values and unrelated values.
+
+## 1. Duplicated observations
+
+Duplicated observations are one type of anomalies because it may have side effect for analysing data. For example, if the duplicated observations happen to be a maximum of one variable, then the analysis on that variable is not true: the mean or quatiles can be false. By removing the duplicated observations, we can get accurate statistics about the data, which will no longer be drived away by some huge deplicated observations.
+```{r}
+# Removing the duplicated observations.
+## consider posts with the same title, body ,header, city and price as duplicated posts.
+post = with(vposts,paste0(title, body, header, city, price))
+d = duplicated(post)
+Vposts_rmDup = vposts[!d,]
+dim(vposts)
+dim(Vposts_rmDup)
+```
+
+## 2. Extreme/unreasonable/suspicious values
+
+By plotting and summarising, we can notice some extreme/unreasonable values. For example year being 4 or 2022 and price being $1 or $60003000. These values are obviously nonsense by common sense and still will mess up our statistics calculation.
+
+Take "year" as an example for spotting and fixing extreme/unreasonable values:
+```{r}
+# find specific "weird" years.
+summary(vposts$year)
+head(sort(vposts$year))
+tail(sort(vposts$year))
+table(cut(vposts$year, c(0, 4, 1900, 2015, 2016, 2022, Inf)))
+```
+
+```{r}
+# find real years by looking into the posts words descriptions and/or google the model.
+vposts_fxYear = vposts
+# year = 4
+vposts_fxYear[vposts_fxYear$year == 4, "title"]
+vposts_fxYear[vposts_fxYear$year == 4, "year"] = 2004
+# year = 2016
+i = !is.na(vposts_fxYear$year) & vposts_fxYear$year == 2016 
+i = which(i)
+w1 = grepl("19[0-9][0-9]", vposts_fxYear$body[i])
+w2 = grepl("20[0-9][0-9]", vposts_fxYear$body[i])
+vposts_fxYear$year[i[w1]] = as.integer(gsub(".*(19[0-9][0-9]).*", "\\1", vposts$body[i[w1]]))
+vposts_fxYear$year[i[w2]] = as.integer(gsub(".*(20[0-9][0-9]).*", "\\1", vposts$body[i[w2]]))
+# table(vposts_fxYear$year[!is.na(vposts_fxYear$year) & vposts_fxYear$year == 2016])
+# year = 2022
+vposts_fxYear[vposts_fxYear$year == 2022, "body"]
+vposts_fxYear[vposts_fxYear$year == 2022, "year"] = 2005
+# why 2005:same post with a correct year found on:http://www.queensbestautoinc.com/Dealer-Websites/Queens-Best-Auto/viewinventorydetails.aspx?inventoryid=L6xXqB6Pi5o%3D
+```
+
+After our clean-up, we can use this corrected year to calculated statistics and to explore relationships with other variables without being misled by weird values.
+
+## 3. Unrelated values
+
+For condition, if we check all the descriptions, we'll notice that there are some totally unrelated value such as "honnda" and "207,400".
+```{r}
+conditions = levels(vposts$condition)
+conditions = sprintf('"%s",\n', conditions)
+cat(conditions)
+```
+
+Since basically the longer road a car goes, the more "used" it is, this problem can be fixed by looking into the odometer of it, which in this case is NA sadly.
+
+```{r}
+vposts[which(vposts$condition == "honnda"), "odometer"]
+```
+
+# Interesting insights
+Find at least 3 interesting insights/characteristics/features illustrated by the data. Explain in what way these insights are interesting (to whom? why?) and provide evidence for any inference/conclusions you draw. How generalizable are these insights to other vehicle sales data?
+
+## 1. Price and odometer are negatively related.
+
+```{r, warning = FALSE, message = FALSE}
+library(dplyr)
+library(ggplot2)
+# first fix unreasonable odometer and plot using common price
+vposts$odometer[vposts$odometer > 250000] <- median(vposts$odometer)
+vposts[vposts$price > 10 & vposts$price < 100000,] %>% 
+  ggplot(aes(x = odometer, y = price)) +
+  geom_point(size = 1.5, col = "lightblue") +
+  geom_smooth(method = "lm") +
+  labs(title = "relationship between odometer reading and price")
+```
+
+As we can see from the above plot, there is such a trend that the larger odometer a car has, the lower its price is. Specifically, most cars sold at price over$25000 have odometer reading under 100000, namely most cars that have an odometer reading over 100000 are offered under $25000.
+This information is interesting to both posters and buyers because they can estimate proper price for a certain odometer or vice versa. This nagative relation between odometer and price can be generalized to other vehicle sales data though the specific slope may vary.
+
+## 2. City "lies" to you on  actual location 
+
+```{r}
+# plot the posts on a U.S. map, colored by city.
+library(maps)
+map('state')
+title("Vehicle Sales Posts")
+colors = c("red", "green", "lightblue", "blue", "violet", "orange", "purple")
+points(x = vposts$long, y = vposts$lat, col = colors[vposts$city], cex = 0.75)
+text(x=state.center$x, y=state.center$y, state.abb, cex = 0.5) 
+legend("bottomright", legend = levels(vposts$city), col = colors, pch = 1, cex = 0.75)
+```
+
+An interesting notice is that, while most posts' longitudes and latitudes agree with their city, posts in LasVegas(darkblue dots) tend to spread all over the country. Why would posts posted from far away in NY or WA also choose LasVegas?
+
+I guess this probably has something to do with regional economics, which I am not an expert in unfortunally. But to be sure, we need to know how cities, longitudes and latitudes are recorded. According to variable descriptions, the longitude and latitude are that of the poster or of the location of the car, or both; while city is the city on whose bulletin board the post was submitted. Is it because posts posted on Vegas's bullitin board get larger chance be seen? Or people in Vegas tend to travel around a lot? If the reason behind is the former, then I think this finding may cause interest in other salers or owners who wants to sell their cars soon.
+
+## 3.How long does it need to have a car sold?
+
+I noticed that there are two variables relating to date: updated and time. We can estimate how long does it need to have a car sold by making a difference. If it's updated, then we know that it's nor sold yet.
+```{r}
+dates = vposts[ , c("time", "updated")]
+dates = na.omit(dates)
+dates = strptime(dates, "%Y-%m-%d %H:%M:%S")
+dates$duration = dates$updated - dates$time
+```
+
+We can even explore the relationship between sold time and car qualities.
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

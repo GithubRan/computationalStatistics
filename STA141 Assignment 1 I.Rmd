@@ -1,0 +1,189 @@
+---
+title: "STA141 Assignment 1 I"
+author: "RanLiu"
+date: "September 25, 2015"
+output: word_document
+---
+
+Load the data and packages into R using
+
+```{r, message = FALSE}
+setwd("E:/RLiu_R/sta141")
+load(url("http://eeyore.ucdavis.edu/stat141/Data/vehicles.rda"))
+library(ggplot2)
+library(dplyr)
+library(maps)
+```
+
+1 How many observations are there in the data set?
+```{r}
+nrow(vposts)
+```
+2 What are the names of the variables? and what is the class of each variable?
+```{r}
+names(vposts)
+rapply(vposts, class)
+```
+3 What is the average price of all the vehicles? the median price? and the deciles? Displays these on a plot of the distribution of vehicle prices.
+```{r}
+summary(vposts$price)
+#notice that min and max are unreasonable, figure out why
+length(which(sort(vposts$price) %in% seq(1,10, 1)))
+tail(sort(vposts$price))
+#so plot without outliers
+par(mgp = c(0, 1, 0))
+boxplot(vposts$price, outline = FALSE, xlab = "vehicles w/o outliers", ylab = "price", main ="vehicles price")
+#zoom in: find a proper cut to plot histogram part of the data:
+hist(vposts$price[vposts$price < 5000000])
+rug(vposts$price[vposts$price < 5000000], col = "red")
+hist(vposts$price[vposts$price < 40000])
+```
+4 What are the different categories of vehicles, i.e. the type variable/column? What is the proportion for each category ?
+```{r}
+unique(vposts$type)
+prop.table(table(vposts$type))*100 #display in percent
+# However half of the car type is NA.
+sum(is.na(vposts$type))
+```
+5 Display the relationship between fuel type and vehicle type. Does this depend on transmission type?
+```{r, warning=FALSE, error=FALSE}
+vposts %>%
+  filter(transmission == c("automatic", "manual")) %>% 
+  filter(type != "NA" & fuel != "NA") %>% 
+  ggplot(aes(x = type, y = ..count.., fill = fuel)) +
+  geom_bar() +
+  facet_wrap(~transmission) +
+  theme(axis.text.x = element_text(angle = 45)) +
+  labs(title="relationship between fuel type and vehicle type")
+```
+The plot shows that: 
+1.Most of both of automatic transmission vehicles and manual transmission vehicles uses gas
+2.Automatic transmission vehicles have five types of vehicles that uses diesel while manual transmission vehicles only have SUV using diesel.
+3.Automatic transmission vehicles have types of vehicles that uses "other" fuel while manual transmission vehicles have not.
+
+6 How many different cities are represented in the dataset?
+```{r}
+sum(is.na(vposts$city)) # check the NAs
+length(unique(vposts$city)) 
+```
+7 Visually display how the number/proportion of "for sale by owner" and "for sale by dealer" varies across city?
+```{r}
+vposts %>% 
+  ggplot(aes(x = city, y = ..count.., fill = byOwner)) +
+  geom_bar(position = "dodge")
+```
+The plot shows no obvious difference across city whether it is the number or the proportion of "for sale by owner" and "for sale by dealer".
+
+8 What is the largest price for a vehicle in this data set? Examine this and fix the value. Now examine the new highest value for price.
+```{r}
+max(vposts$price, na.rm = TRUE)
+tail(sort(vposts$price), 10)
+#manually fix the largest four values to reasonable values.
+vposts$price[which(vposts$price == 600030000)] <- (6000 + 30000) / 2
+vposts$price[which(vposts$price == 30002500)] <- (3000 + 2500) / 2
+vposts$price[which(vposts$price == 9999999)] <- median(vposts$price)
+max(vposts$price, na.rm = TRUE)
+```
+9 What are the three most common makes of cars in each city for "sale by owner" and for "sale by dealer"? Are they similar or quite different?
+```{r}
+bycitybyowner <- split(x = vposts, f = list(vposts$city, vposts$byOwner))
+top3 <- function(x){
+  names(tail(sort(table(x$maker)), 3))
+}
+sapply(bycitybyowner, FUN = top3)
+```
+Results shows that top 3 makers in each city for "sale by owner" and for "sale by dealer" are similar, with slight difference in the order within the top 3.
+
+10 Visually compare the distribution of the age of cars for different cities and for "sale by owner" and "sale by dealer". Provide an interpretation of the plots, i.e., what are the key conclusions and insights?
+```{r}
+summary(vposts$year)
+vposts[vposts$year == 4,]$year <- 2004
+vposts %>% 
+  .[-which(vposts$year == 2022),] %>% 
+  ggplot(aes(x = city, y = 2015 - year, fill = city)) +
+  geom_boxplot()+
+  facet_wrap(~byOwner)+
+  theme(axis.text.x = element_text(angle = 45)) +
+  labs(title="FALSE = sale by dealer, TRUE = sale by owner")
+```
+11 Plot the locations of the posts on a map? What do you notice?
+```{r}
+map('state')
+title("Vehicle Sales Posts")
+points(x = vposts$long, y = vposts$lat, col = 'orange', pch = "*")
+text(x=state.center$x, y=state.center$y, state.abb, cex = 0.5) 
+```
+I notice that most posts are in CA, CO, IL and the four northeast states: NH,MA,CT and RI.
+
+12 Summarize the distribution of fuel type, drive, transmission, and vehicle type. Find a good way to display this information.
+```{r}
+#numbers:
+sum12 <- sapply(list(vposts$fuel, vposts$drive, vposts$transmission, vposts$type), summary)
+names(sum12) <- c("fuel", "drive", "transmission", "type")
+sum12
+```
+
+```{r}
+#visual:
+ na.omit(vposts) %>% 
+  ggplot( aes(x = fuel, y = ..count.., fill = type)) +
+  geom_histogram(position = "dodge", na.rm = TRUE) +
+  facet_grid(transmission ~ drive) +
+  theme(axis.text.x = element_text(angle = 45)) +
+  labs(title = "distribution of fuel type, drive, transmission, and vehicle type")
+
+```
+13 Plot odometer reading and age of car? Is there a relationship? Similarly, plot odometer reading and price? Interpret the result(s). Are odometer reading and age of car related?
+```{r}
+summary(vposts$odometer)
+vposts$odometer[vposts$odometer > 250000] <- median(vposts$odometer)
+vposts$year[which(vposts$year == 4)] <- 2004
+vposts %>% 
+  .[-which(vposts$year == 2022),] %>% 
+  ggplot(aes(x = 2015 - year, y = odometer)) +
+  geom_point(size = 1.5, col = "lightblue") +
+  geom_smooth(method = "lm") +
+  labs(title = "relationship between odometer reading and age")
+```
+There is such a trend that the older the car is, the larger odometer it has.
+
+```{r}
+vposts[vposts$price < 60000,] %>% 
+  ggplot(aes(x = odometer, y = price)) +
+  geom_point(size = 1.5, col = "lightblue") +
+  geom_smooth(method = "lm") +
+  labs(title = "relationship between odometer reading and price")
+```
+There is such a trend that the larger odometer a car has, the lower its price is.
+
+14 Identify the "old" cars. What manufacturers made these? What is the price distribution for these?
+```{r}
+oldcars = subset(vposts, vposts$year < quantile(vposts$year, .25))
+head(sort(table(oldcars$maker), decreasing = TRUE), 5)
+par(mgp = c(0, 1, 0))
+boxplot(oldcars$price, outline = FALSE, xlab = "Cars: Years in the first quantile", ylab = "price", main = "Price Distribustion of Old cars")
+summary(oldcars$price)
+```
+15 I have omitted one important variable in this data set. What do you think it is? Can we derive this from the other variables? If so, sketch possible ideas as to how we would compute this variable.
+
+Answer: The omitted variable can be the model. Since only maker cannot decide the price and quality of a car.We can find the model in the first line of the post body. To do this with technique, I guess regular expression can be used since there is a "\n" after mode.
+```{r}
+vposts$model <- gsub("\n.*", "", vposts$body)
+head(vposts$model)
+```
+16 Display how condition and odometer are related. Also how condition and price are related. And condition and age of the car. Provide a brief interpretation of what you find.
+```{r}
+# first summarize the condition description into several categories.
+unique(vposts$condition)
+vposts$condCut <- rep(" ", length(vposts$condition))
+vposts$condCut[vposts$condition %in% 
+                 c("like new", "new", "excellent", "very good", "superb original", "carfax guarantee!!", "certified")]<- "New/LikeNew"
+vposts$condCut[vposts$condition %in% 
+                 c("fair", "good", "nice")]<- "fair"
+vposts$condCut[vposts$condition %in% 
+                 c("pre owned", "preownes", "preowned", "pre-owned", "used", "0used")]<- "Preowned"
+vposts$condCut[vposts$condition %in% 
+                 c("front side damage", "hit and run :( gently", "muscle car restore","needs restoration!", "needs total restore", "needs work", "needs bodywork", "nice rolling restoration", "restoration", "restoration project", "rebuildable project", "project", "restore", "restored", "rough but runs", "needs restored", "salvage")]<- "NeedRestore"
+# Sorry it's due time. I will finish it after due time.
+
+```

@@ -1,0 +1,227 @@
+---
+title: "hw4code"
+author: "RanLiu"
+date: "November 16, 2015"
+output: word_document
+---
+
+# STA141HW4
+# by: Ran Liu 912567961
+
+
+## ---- "Preparation", message = FALSE-------------------------------------
+setwd("E:/RLiu_R/sta141/HW4")
+load("vehicles.rda")
+body = vposts$body
+library(stringr)
+f1 = function(rx, text = body) {
+  table(grepl(rx, text))
+}
+
+
+## ---- "extract the price from body"--------------------------------------
+pr = '\\$[0-9][0-9,]*[Kk]?'
+f1(pr)
+price.body = str_extract(body, pr)
+price.body = str_replace_all(price.body, "[$,]", "")
+price.title = str_extract(vposts$title, pr)
+price.title = str_replace_all(price.title, "[$,]", "")
+prices = data.frame(given = vposts$price, body = as.integer(price.body), title = as.integer(price.title))
+compare.price = mapply(identical, prices$given, prices$body)
+table(compare.price)
+
+## ---- echo = FALSE, "compare price"--------------------------------------
+dismatch = prices[(!compare.price) & (!is.na(prices$body)),]
+dismatch[sample(nrow(dismatch), 5),]
+
+## ---- "Extract VIN for vehicles model year 1981 and newer"---------------
+vin1 = '(VIN|vin)[[:punct:]| ]*([:alnum:]{17})'
+VIN1 = str_match(string = body, pattern = vin1)[,3]
+
+## ---- "Extract VIN for vehicles model year 1981 and older"---------------
+oldbody = body[vposts$year < 1981]
+# recognize by prefix vin, digits does not have to be 17, to avoid normal words, set this arbitary rule that VIN has to contain at least one numeric number.
+vin2 = '(VIN|vin)[[:punct:]| ]*([:alnum:]*[0-9]+[:alnum:]*)'
+VIN2 = str_match(string = oldbody, pattern = vin2)[,3]
+unique(VIN2)
+
+## ----"put VIN1 and VIN2 together"----------------------------------------
+VIN = VIN1
+VIN[vposts$year < 1981] = VIN2
+vposts$vin = VIN
+sum(!is.na(vposts$vin))
+
+## ---- "extract phone numbers"--------------------------------------------
+chrnum = paste(c("one", "two", "three", "four", "five", "six", "seven", "eight", "nine"), collapse = "|")
+ph = '\\(?(chrnum|[0-9]){3}\\)?[[:punct:]| ]*(chrnum|[0-9]){3}[[:punct:]| ]*(chrnum|[0-9]){4}'
+phone = str_extract(body, ph)
+phone = unlist(phone)
+vposts$phone = phone
+sum(!is.na(vposts$phone))
+sample(phone, 5)
+
+## ---- "extract emails"---------------------------------------------------
+em = '[[:alnum:][:punct:]]+@[[:alnum:]|[:punct:]]+\\.(com|net|org|edu)'
+f1(em)
+email = str_extract(vposts$body, em)
+vposts$email = email
+sum(!is.na(vposts$email))
+sample(email[!is.na(vposts$email)], 5)
+
+## ---- "extract years"----------------------------------------------------
+yr = '\\b((19|20)[0-9]{2})\\b'
+des.year = str_extract(vposts$description, yr)
+years = data.frame(given = vposts$year, des = as.integer(des.year))
+compare.year = mapply(identical, years$given, years$des)
+sum(!compare.year)
+sum((!compare.year) & (is.na(years$des)))
+
+## ---- "check unmatched years"--------------------------------------------
+head(years[(!compare.year) & (!is.na(years$des)),])
+head(vposts$description[(!compare.year) & (!is.na(years$des))])
+
+
+## ---- "how to extract the models"----------------------------------------
+#split headings into parts separated by a single space.
+library(stringr)
+header.part = strsplit(x = vposts$header, split = " ")
+
+#see the number of parts of each header and count.
+options(width = 60)
+table(sapply(header.part, length))
+
+#have a look at headings having 4-10 parts
+set.seed(141)
+sample(vposts$header[sapply(header.part, length) %in% c(4,10)], 10, replace = FALSE)
+
+## ---- extract models-----------------------------------------------------
+#regular expression: year + maker + model + other
+mod = '^[0-9]{4} [a-zA-Z]+ ([[:alnum:]]+).*'
+model = gsub(mod, "\\1", vposts$header)
+table(grepl(mod, vposts$header))
+
+## ---- organize the models------------------------------------------------
+sort(table(model), decreasing = TRUE)[1:20]
+
+# function uni() will unify the spelling of models that are all actually one given model. 
+uni = function(standard, text = model){
+  #standard: a regular expression containing the goal model name.
+  #text: a vector of character that to be unified.
+  logi = agrepl(standard, text, max.distance = 1, ignore.case = TRUE)
+  text[logi] = gsub("\\^", "", standard)
+  return(text)
+}
+
+# Choose top frequency models to unify.
+standards = c("^Accord", "^Civic", "^Grand", "^Camry",  "^Altima", "^Corolla", "^Silverado", "^Maxima", "^Jetta")
+for (i in 1:length(standards)){
+  model = uni(standards[i], model)
+}
+
+
+## ---- choose two models for regression-----------------------------------
+top.model = sort(table(model), decreasing = TRUE)[1:5]
+#add model to vposts to see the corresponding makers
+vposts$model = model
+see.maker = function(modelname){
+  unique(vposts$maker[vposts$model == modelname])
+}
+sapply(names(top.model),see.maker)
+
+## ---- "Convert conditions to new categories", echo = FALSE---------------
+# Define new categories.
+new_cats = list(
+  excellent = c("excellent"),
+  good = c("good", "very good"),
+  "like new" = c("like new", "mint", "new", "pre owned", "pre-owned", "preowned", "preownes"),
+  used = c("0used", "used"),
+  fair = c("fair", "nice", "nice teuck"),
+  salvage = c("complete parts car, blown engine", "front side damage", "hit and run :( gently", 
+              "muscle car restore", "needs bodywork", "needs restoration!", "needs restored",
+              "needs total restore", "needs work", "needs work/for parts", "nice rolling restoration",
+              "not running", "parts", "project", "project car", "rebuildable project", "restoration",
+              "restoration project", "restore", "restored", "salvage", "rough but runs"),
+  other = c("207,400", "ac/heater", "carfax guarantee!!", "certified", "honnda", "superb original" )
+)
+
+# Convert conditions to new categories.
+vposts$new_cond = vposts$condition
+levels(vposts$new_cond) = c(levels(vposts$new_cond), "other")
+
+for (i in seq_along(new_cats)) {
+  new_cat = names(new_cats)[[i]]
+  vposts$new_cond[vposts$new_cond %in% new_cats[[i]]] = new_cat
+}
+
+vposts$new_cond = factor(vposts$new_cond)
+table(vposts$new_cond)
+
+## ---- "subset for reasonable prices and store it in vpsots1", echo = FALSE----
+idx = (vposts$price >= 500 & vposts$price <= 50000 & !is.na(vposts$price))
+vposts1 = vposts[idx, ]
+summary(vposts1$price)
+
+## ---- "subset for reasonable years and store it in vpsots1", echo = FALSE----
+# Omitted here for brevity
+vposts1 = vposts1[ !(vposts1$year %in% c(4, 1900, 2022)) & !is.na(vposts1$year), ]
+
+# Clean up
+vposts1$year[ vposts1$year == 2022 & !is.na(vposts1$year) ] = 2002
+vposts1 = vposts1[ -which(vposts$year == 1900 & !is.na(vposts$year)), ]
+vposts1$year[ vposts1$year == 4 & !is.na(vposts1$year) ] = 2004
+
+# Create an age variable
+vposts1$age = 2016 - vposts1$year
+
+summary(vposts1$age)
+
+## ---- "subset for reasonable odometers and store it in vpsots1", echo = FALSE----
+idx = ( vposts1$odometer < 500000 & !is.na(vposts1$odometer) & !is.na(vposts1$age) )
+vposts1 = vposts1[idx, ]
+summary(vposts1$odometer)
+
+## ---- subset to get data for civic and camry-----------------------------
+civic = vposts1[vposts1$model == "Civic", c("price", "odometer", "age", "new_cond", "city")]
+camry = vposts1[vposts1$model == "Camry", c("price", "odometer", "age", "new_cond", "city")]
+str(civic)
+str(camry)
+
+## ---- "scale the data"---------------------------------------------------
+civic.sd = civic
+camry.sd = camry
+civic.sd[, c("price", "odometer", "age")] = scale(civic[, c("price", "odometer", "age")])
+camry.sd[, c("price", "odometer", "age")] = scale(camry[, c("price", "odometer", "age")])
+
+## ---- "Scatter plot of Y and Xs", echo = FALSE---------------------------
+plot(civic.sd, main = "Scatter plot of Civic - standardized data")
+plot(camry.sd, main = "Scatter plot of Camry - standardized data")
+
+## ---- "First-order model"------------------------------------------------
+#Civic
+civic.fit = lm(price ~ odometer + age + new_cond +city, data = civic.sd)
+summary(civic.fit)
+#Camry
+camry.fit = lm(price ~ odometer + age + new_cond + city, data = camry.sd)
+summary(camry.fit)
+
+## ---- "residual vs fitted plot and QQ plot", echo = FALSE----------------
+
+#residual plots
+par(mfrow = c(1,2), mar = c(2,2,2,2))
+plot(civic.fit, 1, col = "lightblue", labels.id = "")
+#par()$usr
+text(-1, 1.5, "Civic")
+plot(camry.fit, 1, col = "lightblue", labels.id = "")
+text(-1, 1, "Camry")
+#QQ plot
+par(mfrow = c(1,2), mar = c(2,2,2,2))
+plot(civic.fit, 2, labels.id = "")
+text(-1, 1.5, "Civic")
+plot(camry.fit, 2, labels.id = "")
+text(-1, 1.5, "Camry")
+
+## ---- "anova"------------------------------------------------------------
+anova(civic.fit)
+anova(camry.fit)
+
+

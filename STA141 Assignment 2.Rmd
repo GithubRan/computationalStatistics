@@ -1,0 +1,249 @@
+---
+title: "STA141 Assignment 2"
+author: "RanLiu"
+date: "October 12, 2015"
+output: word_document
+---
+# Step One
+
+1. function samedate() reads one txt file and returns a dataframe with date,lat,long and certain variable.
+ 
+```{r, message=FALSE, queit = TRUE}
+# function samedate() reads one txt file and returns a dataframe with four variables.
+samedate = function(fullname){
+  setwd("E:/RLiu_R/sta141")
+  long = scan(fullname, skip = 5, nlines = 2, what = character(), quiet = TRUE)[1:24]
+  date = scan(fullname, skip = 4, nlines = 1, what = character(), quiet = TRUE)[3]
+  g = read.table(fullname, skip = 7, stringsAsFactors = FALSE)[,c(-2,-3)]
+  colnames(g) = c("lat", long)
+  library(reshape2)
+  valueName = gsub("[0-9].*", "", basename(fullname))
+  g = melt(g, id.vars = "lat", variable.name = "long", value.name = valueName)
+  g$long = as.character(g$long)
+  g$date = date
+  g
+}
+```
+
+```{r, queit = TRUE}
+head(samedate("NASA/cloudhigh1.txt"))
+```
+
+2. combine different dates of same variable & do this for all the seven variables
++ get filenames, loop it over function samedate() to get all 72 data for one variable
++ loop over grouped filenames and get the similar data frame for all 7 variables.
+
+```{r,  queit = TRUE}
+#combine different dates of same variable & do this for all the seven variables
+setwd("E:/RLiu_R/sta141")
+varnames = gsub("[0-9].*", "", list.files("NASA/", pattern = "\\.txt$"))
+groupfilenames = split(list.files("NASA/", pattern = "\\.txt$", full.names = TRUE), varnames)
+samevar = function(txtnames){
+  df = do.call(rbind, lapply(txtnames, samedate))
+  return(df)
+}
+listofdfs = lapply(groupfilenames, samevar)
+sapply(listofdfs, dim)
+```
+
+```{r, queit = TRUE}
+head(listofdfs[[1]],3)
+```
+
+# Step Two
+
+1. Check if locations and dates match across the seven variables.
++ function checktwo() checks whether lat long and date of two dataframes are identical
++ use checktwo() to compare each element of listofdfs with the first one
+```{r,  queit = TRUE}
+checktwo = function(x, y) {
+  cols = c("lat", "long", "date")
+  identical(x[, cols], y[, cols])
+}
+dfs_match = sapply(listofdfs[-1], checktwo, listofdfs[[1]])
+all(dfs_match)
+```
+
+2.  Merge the seven dataframes into one big dataframe. Merge by same location and date.
++ function myMerge() merge two data frames by lat long and date
++ use Reduce() to loop over listofdfs and apply function myMerge()
+```{r,  queit = TRUE}
+myMerge = function (x, y){
+  merge(x, y, all = TRUE, by = c("lat", "long", "date"))
+}
+whole = Reduce(myMerge, listofdfs)
+```
+```{r}
+head(whole)
+```
+
+# Step Three: Elevation
+1.  get elevations in each single grid, assign to "elev"
+```{r,  queit = TRUE}
+#get elevations in each single grid, assign to "elev"
+setwd("E:/RLiu_R/sta141")
+elev = read.table("NASA/intlvtn.dat", check.names = FALSE)
+elev$lat = rownames(elev)
+library(reshape2)
+elev = melt(elev, id.vars = "lat", variable.name = "long", value.name = "elevation")
+elev$long = as.character(elev$long)
+```
+```{r, queit = TRUE}
+head(elev)
+```
+
+2. unify the latitude and longitude format
++ directions to +/-
++ round up/down lats and longs in "elev" to agree with those in "whole".
+```{r,  queit = TRUE}
+#unify the latitude and longitude format
+##directions to +/-
+###latitude
+latchar = nchar(whole$lat)
+directionNS = substr(whole$lat, latchar, latchar)
+southern = (directionNS == "S")
+whole$lat = substr(whole$lat, 1, latchar - 1)
+whole$lat[southern] = - as.numeric(whole$lat[southern])
+###longitude
+longchar = nchar((whole$long))
+directionEW = substr(whole$long, longchar, longchar)
+western = (directionEW == "W")
+whole$long = substr(whole$long, 1, longchar - 1)
+whole$long[western] = - as.numeric(whole$long[western])
+##round up/down lats and longs in "elev" to agree with those in "whole".
+elev[, c("lat", "long")] = apply(elev[, c("lat", "long")], 2, as.numeric)
+elev[, c("lat","long")] = round(elev[, c("lat","long")], 1)
+```
+```{r, queit = TRUE}
+head(whole[, c("lat", "long")], 3)
+```
+
+3. match the lat and long and return corresponding elevation to each grid.
++ match() returns the indice of corresponding elevation in elev
++ use output mymatch to create a 41472 repeatance of elev with 72 rows.
+```{r,  queit = TRUE}
+##match the grid and add corresponding elevation to each row
+whole$position = paste0(whole$lat, whole$long)
+elev$position = paste0(elev$lat, elev$long)
+mymatch = match(whole$position, elev$position)
+whole$elev = elev$elevation[mymatch]
+```
+```{r, queit = TRUE}
+head(whole, 3)
+```
+# Step Four: Exploring the Data Graphically
+
+## Plot temperature versus pressure. Color code the points by the value of cloudlow.
+1. break cloudlow into groups for coloring 
+2. coerce the three variables are numeric
+3. use ggplot() to touch modify it.
+```{r, warning = FALSE, message = FALSE, fig.width = 12, fig.height = 9,  queit = TRUE}
+library(ggplot2)
+library(dplyr)
+cloudlowGroup = cut(as.numeric(whole$cloudlow), breaks = 5)
+whole[whole$cloudlow != "....", ] %>% 
+  mutate(cloudlowGroup = cut(as.numeric(.$cloudlow), breaks = 5)) %>% 
+  ggplot(aes(x = jitter(pressure), y = jitter(temperature), color = cloudlowGroup)) +
+  geom_point(size = 2) +
+  xlab("Pressure") +
+  ylab("Temparature") +
+  ggtitle("Temperature vs Pressure") +
+  theme_bw() +
+  theme(axis.title.y = element_text(size = 7))
+```
+
+## For the points at the four corners of the spatial grid, display the values of temperature over time.
+
+1. find the lats and longs at the four corners
+2. Coerce date to type Date
+3.
+```{r, fig.width = 12, fig.height = 9,  queit = TRUE}
+#find the corners
+whole[, c("lat", "long")] = apply(whole[, c("lat", "long")], 2, as.numeric)
+bound =   function(x){
+    min = min(x)
+    max = max(x)
+    return(c(min, max))
+  }
+bounds = as.data.frame(sapply(whole[,c("lat", "long")], bound))
+corners = as.data.frame(expand.grid(bounds$lat, bounds$long))
+colnames(corners) = c("lat", "long")
+#date format
+whole$date = as.Date(whole$date, "%d-%b-%Y")
+#subset data of the four corners
+cornerdata = whole[whole$lat %in% corners$lat & whole$long %in% corners$long, c("lat", "long", "temperature", "date")]
+#plotting
+cornerdata %>% 
+  mutate(position = paste0("lat=", lat, " long=", long)) %>% 
+  ggplot(aes(x = date, y = temperature, color = position)) +
+  geom_line(size = 1) +
+  facet_wrap(~position) +
+  ggtitle('Temparater vs Date of Four Corners') +
+  theme(legend.position="none") +
+  theme_bw()
+```
+
+## For all points on the grid, compute the average and standard deviation for each of the 7 variables across time.
+1. loop over each data frame's columns to calculate their mean.
+2. loop over filenames :do the above for all seven variables.
+3. merge the list result to get a data frame.
+```{r, warning = FALSE, queit = TRUE}
+#mean
+whole$cloudlow = as.numeric(whole$cloudlow)
+roundmean = function(x){round(mean(x), 2)}
+myMean = function(x){
+ aggregate(whole[,x] ~ whole$lat + whole$long, data = whole, roundmean)
+}
+wholemeans = lapply(unique(varnames), myMean)
+merge2 = function(x, y){
+  merge(x, y, all = TRUE, by = c("whole$lat", "whole$long"))
+}
+wholemeans = Reduce(merge2, wholemeans)
+colnames(wholemeans) = c(c("lat", "long"), unique(varnames))
+#sd
+whole$cloudlow = as.numeric(whole$cloudlow)
+mysd= function(x){
+ aggregate(whole[,x] ~ whole$lat + whole$long, data = whole, sd)
+}
+wholesd = lapply(unique(varnames), mysd)
+merge2 = function(x, y){
+  merge(x, y, all = TRUE, by = c("whole$lat", "whole$long"))
+}
+wholesd = Reduce(merge2, wholesd)
+colnames(wholesd) = c(c("lat", "long"), unique(varnames))
+```
+
+```{r, queit = TRUE}
+head(wholemeans, 3)
+head(wholesd, 3)
+```
+
+## Display the average value for pressure computed in the previous question on a map.
+1. get a map using get_map, set parameters
+2. add points to it
+```{r, fig.width = 12, fig.height = 9,  warning = FALSE, queit = TRUE}
+head(wholemeans)
+library(ggmap)
+mapbound = c(bounds$long[1], bounds$lat[1], bounds$long[2], bounds$lat[2])
+hw2map = get_map(location = mapbound, source = "google", maptype = "terrain", color = "bw")
+Pressure = wholemeans$pressure
+ggmap(hw2map) +
+  geom_point(aes(x = wholemeans$long, y = wholemeans$lat, color = Pressure), data = wholemeans, alpha = 1, size = 5) +
+  theme_bw() +
+  ggtitle("Average Pressure at Each Position")
+```
+
+## Display average surface temperature versus elevation.
+*merge wholemeans data frame with elev, get meannelev.
+```{r, fig.width = 12, fig.height = 9,  warning = FALSE, queit = TRUE}
+meannelev = merge(elev, wholemeans, by = c("lat", "long"))
+head(meannelev, 3)
+ggplot(meannelev, aes(x = jitter(surftemp), y = jitter(elevation))) +
+  geom_point() +
+  geom_smooth() +
+  xlab("Surface Temperature") +
+  ylab("Elevation") +
+  theme_bw() +
+  ggtitle("Average Surface Temperature vs Elevation")
+```
+

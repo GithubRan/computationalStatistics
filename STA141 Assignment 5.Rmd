@@ -1,0 +1,268 @@
+---
+title: "STA141 Assignment 5"
+author: "RanLiu"
+date: "November 21, 2015"
+output: word_document
+---
+
+```{r}
+# set up
+setwd("E:/RLiu_R/sta141/HW5")
+library(RSQLite)
+db = dbConnect(SQLite(), "lean_imdbpy.db")
+dbGetQuery(db, "SELECT * FROM genres " )
+dbListTables(db)
+dbListFields(conn = db, name = "genres")
+```
+
+1. How many actors are there in the database? How many movies?
+
+For actors:
+* Count personID in castInfo 
+* join castInfo with roleType
+* restrict role to only actor and actress.
+
+```{r}
+actor.total = dbGetQuery(db, "SELECT COUNT(DISTINCT(cast_info.person_id)) 
+                         FROM cast_info, role_type
+                         ON cast_info.role_id = role_type.id
+                         WHERE role_type.id IN ('actor', 'actress)" )
+
+```
+
+For movies:
+* count ID in title
+* join title and kind_type
+* restrict kind to only movie (as opposed to tv series or tv movie or other kinds).
+
+```{r}
+dbGetQuery(db, "SELECT * FROM title" )
+movie.total = dbGetQuery(db, "SELECT COUNT(title.id)) 
+                         FROM title, kindtype
+                         WHERE title.kind_id = kind_type.id
+                         AND kind_type.kind = 'movie'")
+```
+
+2. What time period does the database cover? 
+
+Look through tables to find all fields that may contains date.
+
+* From infoType table, we can see there are 6 types of info relating to date. These info are stored in the info field in the movieInfo table, movieInfoIDX table and personInfo table, all indexed by infoTypeID. They are: "release dates", "birth date", "death date", "LD date", "production dates", "filming dates"
+
+```{r}
+dbGetQuery(db, 'SELECT * FROM info_type
+           WHERE info IN ("release dates", "birth date", "death date", 
+                          "LD date", "production dates", "filming dates")')
+```
+
+Join the infoType table and 1.movieInfo table, 2.movieInfoIDX table and 3.personInfo table respectively.
+And get the dates.
+
+```{r}
+dbGetQuery(db, 'SELECT movie_info.info, movie_info.info_type_id, info_type.info
+           FROM movie_info, info_type
+           WHERE movie_info.info_type_id = info_type.id
+           AND info_type.info IN ("release dates", "birth date", "death date", 
+                          "LD date", "production dates", "filming dates") LIMIT 10')
+```
+
+
+* From title table, we can see there is a "productionYear" field and a "seriesYears" field.
+
+```{r}
+dbGetQuery(db, 'SELECT MAX(production_year), series_years FROM title LIMIT 20')
+```
+
+3. What proportion of the actors are female? male?
+
+* count id in name
+* join name and roleType via castInfo
+* restrict role to only actor and actress
+* group by gender in name to get proportion
+
+```{r}
+dbGetQuery(db, 'SELECT COUNT(DISTINCT name.id)
+           FROM name, cast_info, role_type 
+           WHERE name.id = cast_info.person_id
+           AND cast_info.role_id = role_type.id
+           AND role_type.role IN ("actor", "actress")
+           GROUP BY name.gender')
+```
+
+4. What proportion of the entries in the movies table are actual movies and what proportion are television series, etc.?
+
+* count id/movieID ?????? in movieInfo
+* join movieInfo and kindType via title
+* group by kind in kindType
+
+```{r}
+dbGetQuery(db, "SELECT COUNT(DISTINCT(movie_id)) 
+                         FROM movie_info, title, kindtype
+                         WHERE movie_info.movie_id = title.id
+                         AND title.kind_id = kind_type.id
+                         GROUP BY kind_type.kind")
+```
+
+5. How many genres are there? What are their names/descriptions?
+
+* count distinct genres in movieInfo
+* join movieInfo and infoType
+* retrict info in infoType to "genres"
+
+```{r}
+genres = dbGetQuery(db, "SELECT DISTINCT a.info
+           FROM movie_info AS a, info_type AS b
+           WHERE a.info_type_id = b.id
+           AND b.info = 'genres' ")
+#            info
+# 1   Documentary
+# 2    Reality-TV
+# 3        Horror
+# 4         Drama
+# 5        Comedy
+# 6       Musical
+# 7     Talk-Show
+# 8       Mystery
+# 9          News
+# 10        Sport
+# 11       Sci-Fi
+# 12      Romance
+# 13       Family
+# 14        Short
+# 15    Biography
+# 16        Music
+# 17    Game-Show
+# 18    Adventure
+# 19        Crime
+# 20          War
+# 21      Fantasy
+# 22     Thriller
+# 23    Animation
+# 24       Action
+# 25      History
+# 26        Adult
+# 27      Western
+# 28    Lifestyle
+# 29    Film-Noir
+# 30 Experimental
+# 31   Commercial
+# 32      Erotica
+```
+
+So there are 32 genres in total. And their names are listed above.
+
+6. List the 10 most common genres of movies, showing the number of movies in each of these genres.
+
+* create a new table by select from movieinfo that has genre info 
+* count movieID
+* group by info, which are all kinds of genres 
+
+```{r}
+dbGetQuery(db, "CREATE TABLE genres AS 
+           SELECT a.info, a.movie_id
+           FROM movie_info AS a, info_type AS b
+           WHERE a.info_type_id = b.id
+           AND b.info = 'genres' ")
+
+dbGetQuery(db, "SELECT info, COUNT(movie_id)
+           FROM genres
+           GROUP BY info
+           ORDER BY COUNT(movie_id) DESC
+           LIMIT 10")
+```
+
+7. Find all movies with the keyword 'space'. How many are there? What are the years these were released? and who were the top 5 actors in each of these movies?
+
+7(1). How many are there
+
+* count movieID in movieKeyword
+* join movieKeyword and keyword
+* restrict keyword field in keyword table to "space"
+
+```{r}
+dbGetQuery(db, "SELECT COUNT(DISTINCT a.movie_id), b.keyword
+           FROM movie_keyword AS a, keyword AS b
+           WHERE a.keyword_id = b.id
+           AND b.keyword = 'space' ")
+
+## keyword COUNT(movie_id)
+## space             932
+```
+
+There are 932 movies with keyword 'space'.
+
+7(2). What are the years these were released?
+
+* get release dates from movie_info (need processing to get only the years)
+* join movieInfo and infoType to know which are info of "release dates" 
+* join movieInfo and keyword via title and movie_keyword
+* restrict keyword in keyword to 'space'
+
+```{r}
+dbGetQuery(db, "SELECT * FROM info_type
+           WHERE info_type.info LIKE 'r%' ")
+# connect via title 
+dbGetQuery(db, "SELECT c.title, b.info, a.info, a.movie_id, e.keyword
+           FROM movie_info AS a, info_type AS b, title AS c, 
+           movie_keyword AS d, keyword AS e
+           WHERE a.info_type_id = b.id
+           AND b.info = 'release dates'
+           AND a.movie_id = c.id
+           AND c.id = d.movie_id
+           AND d.keyword_id = e.id
+           AND e.keyword = 'space' LIMIT 10")
+```
+
+7(3). who were the top 5 actors in each of these movies
+
+* create a table to store the movieID of movies with keyword "space"
+* join space table and name via castInfo
+* find top actors group by movieID
+
+```{r, "create table space"}
+#create new table
+dbGetQuery(db, "CREATE TABLE space AS 
+           SELECT DISTINCT a.movie_id, b.keyword
+           FROM movie_keyword AS a, keyword AS b
+           WHERE a.keyword_id = b.id
+           AND b.keyword = 'space' ")
+# Have a look at the newly created table "space"
+dbGetQuery(db, "SELECT * FROM space LIMIT 5")
+```
+
+```{r, "find top five actors"}
+top.actor.space = dbGetQuery(db, "SELECT s.keyword, s.movie_id, c.nr_order, n.name
+           FROM space AS s, cast_info AS c, name AS n
+           WHERE s.movie_id = c.movie_id
+           AND c.person_id = n.id
+           AND c.nr_order < 6
+           ORDER BY s.movie_id, c.nr_order")
+```
+
+8. Has the number of movies in each genre changed over time? Plot the overall number of movies in each year over time, and for each genre.
+
+*       1800 1801 .... 2016
+genre1  23    33 ....   456
+genre2  23    33 ....   456
+ ...
+ 
+ title
+ 
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
